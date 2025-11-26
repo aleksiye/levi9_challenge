@@ -17,4 +17,8 @@ app.use('/reservations', reservationRoutes);
 const PORT = 3000;
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
+  console.log('Available routes:');
+  console.log('  STUDENTS:  POST /students, GET /students/:id');
+  console.log('  CANTEENS:  POST /canteens, GET /canteens, GET /canteens/:id, PUT /canteens/:id, DELETE /canteens/:id');
+  console.log('  RESERVATIONS:  POST /reservations, GET /reservations/:id, DELETE /reservations/:id');
 });

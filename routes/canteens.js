@@ -76,7 +76,11 @@ router.get('/:id/status', async (req, res) => {
 
 router.put('/:id', async (req, res) => {
     try {
-        const updatedCanteen = await updateCanteen(req.params.id, req.body);
+        const updatedBy = req.headers['studentid'];
+        if (!updatedBy) {
+            return res.status(400).json({ error: 'Missing studentId header' });
+        }
+        const updatedCanteen = await updateCanteen(req.params.id, req.body, updatedBy);
         if (!updatedCanteen) return res.status(404).json({ error: 'Canteen not found' });
         res.json(updatedCanteen);
     } catch (err) {
@@ -86,7 +90,11 @@ router.put('/:id', async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
     try {
-        const success = await deleteCanteen(req.params.id);
+        const deletedBy = req.headers['studentid'];
+        if (!deletedBy) {
+            return res.status(400).json({ error: 'Missing studentId header' });
+        }
+        const success = await deleteCanteen(req.params.id, deletedBy);
         if (!success) return res.status(404).json({ error: 'Canteen not found' });
         res.status(204).end();
     } catch (err) {

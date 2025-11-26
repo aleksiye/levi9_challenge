@@ -1,4 +1,5 @@
 import redisClient from "../config/redis.js";
+import { getStudent } from "./studentService.js";
 
 const CANTEEN_COUNTER_KEY = 'canteen:id:counter';
 
@@ -177,9 +178,21 @@ export async function getAllCanteensStatus(startDate, startTime, endDate, endTim
     return results;
 }
 
+async function checkAdminStudent(studentId) {
+    // Chack if student creating the canteen is admin
+    const student = await getStudent(studentId);
+    if (!student || !student.isAdmin) {
+        throw new Error('Only admin students can create canteens');
+    }
+}
+
 export async function createCanteen(canteenData) {
     const id = await redisClient.incr(CANTEEN_COUNTER_KEY);
     const canteenKey = `canteen:${id}`;
+
+    // Chack if student creating the canteen is admin
+    await checkAdminStudent(canteenData.createdBy);
+
     await redisClient.hSet(canteenKey, {
         id: id.toString(),
         name: canteenData.name,
@@ -228,8 +241,9 @@ export async function getCanteen(id) {
     };
 }
 
-export async function updateCanteen(id, updateData) {
+export async function updateCanteen(id, updateData, updatedBy) {
     const canteenKey = `canteen:${id}`;
+    await checkAdminStudent(updatedBy);
     const existingCanteen = await redisClient.hGetAll(canteenKey);
     if (Object.keys(existingCanteen).length === 0) {
         return null;
@@ -239,8 +253,9 @@ export async function updateCanteen(id, updateData) {
     return updatedCanteen;
 }
 
-export async function deleteCanteen(id) {
+export async function deleteCanteen(id, deletedBy) {
     const canteenKey = `canteen:${id}`;
+    await checkAdminStudent(deletedBy);
     const result = await redisClient.del(canteenKey);
     return result === 1;
 }

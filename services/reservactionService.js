@@ -71,6 +71,13 @@ export async function createReservation(reservationData) {
     if (!canteen) {
         throw new Error('Canteen not found');
     }
+    // Validate date is not in the past
+    const today = new Date();
+    const reservationDate = new Date(`${date}T${time}:00`);
+
+    if (reservationDate < today) {
+        throw new Error('Reservation date and time cannot be in the past');
+    }
 
     // Validate time is within working hours
     if (!isValidReservationTime(canteen.workingHours, time, duration)) {
