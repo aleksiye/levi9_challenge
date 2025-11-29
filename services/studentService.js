@@ -1,7 +1,4 @@
-import redisClient from "../config/redis.js";
-
-const STUDENT_COUNTER_KEY = 'student:id:counter';
-const STUDENT_EMAIL_INDEX = 'student:email:index';
+import prisma from "../config/db.js";
 
 export async function createStudent(studentData) {
     // Validate required fields exist
@@ -19,9 +16,11 @@ export async function createStudent(studentData) {
     if (trimmedName.length > 100) {
         throw new Error('Name cannot exceed 100 characters');
     }
-    // check if email aleady exists
-    const existingId = await redisClient.hGet(STUDENT_EMAIL_INDEX, studentData.email);
-    if (existingId) {
+    // check if email already exists
+    const existingStudent = await prisma.student.findUnique({
+        where: { email: studentData.email }
+    });
+    if (existingStudent) {
         throw new Error('Email already in use');
     }
     // validate email format
@@ -31,30 +30,33 @@ export async function createStudent(studentData) {
     }
     // Should continue with ZeroBounce or similar email validation service in production
 
-    const id = await redisClient.incr(STUDENT_COUNTER_KEY);
-    const studentKey = `student:${id}`;
-    
-    await redisClient.hSet(studentKey, {
-        id: id,
-        name: studentData.name,
-        email: studentData.email,
-        isAdmin: studentData.isAdmin ? 'true' : 'false'
+    const student = await prisma.student.create({
+        data: {
+            name: trimmedName,
+            email: studentData.email,
+            isAdmin: studentData.isAdmin ? true : false
+        }
     });
 
-    await redisClient.hSet(STUDENT_EMAIL_INDEX, studentData.email, id);
-
-    return { id, ...studentData };
+    return {
+        id: student.id,
+        name: student.name,
+        email: student.email,
+        isAdmin: student.isAdmin
+    };
 }
 
 export async function getStudent(id) {
-    const student = await redisClient.hGetAll(`student:${id}`);
-    if (Object.keys(student).length === 0) {
+    const student = await prisma.student.findUnique({
+        where: { id: parseInt(id, 10) }
+    });
+    if (!student) {
         return null;
     }
     return {
-        id: parseInt(student.id, 10),
+        id: student.id,
         name: student.name,
         email: student.email,
-        isAdmin: student.isAdmin === 'true',
+        isAdmin: student.isAdmin
     };
 }

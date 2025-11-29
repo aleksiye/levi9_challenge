@@ -1,5 +1,5 @@
 import express from 'express';
-import redisClient from './config/redis.js' ;
+import prisma from './config/db.js';
 import studentRoutes from './routes/students.js';
 import canteenRoutes from './routes/canteens.js';
 import reservationRoutes from './routes/reservations.js';
@@ -7,8 +7,9 @@ import reservationRoutes from './routes/reservations.js';
 const app = express();
 app.use(express.json());
 
-await redisClient.flushAll();
-console.log('Flushed all Redis data on startup.');
+// Connect to database
+await prisma.$connect();
+console.log('Connected to PostgreSQL database.');
 
 app.use('/students', studentRoutes);
 app.use('/canteens', canteenRoutes);

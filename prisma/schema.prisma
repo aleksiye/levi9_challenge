@@ -1,0 +1,62 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Student {
+  id           Int           @id @default(autoincrement())
+  name         String        @db.VarChar(100)
+  email        String        @unique @db.VarChar(255)
+  isAdmin      Boolean       @default(false)
+  canteens     Canteen[]     @relation("CreatedCanteens")
+  reservations Reservation[]
+
+  @@map("students")
+}
+
+model Canteen {
+  id           Int                   @id @default(autoincrement())
+  name         String                @db.VarChar(100)
+  location     String                @db.VarChar(200)
+  capacity     Int
+  createdById  Int?
+  createdBy    Student?              @relation("CreatedCanteens", fields: [createdById], references: [id])
+  createdAt    DateTime              @default(now())
+  workingHours CanteenWorkingHours[]
+  reservations Reservation[]
+
+  @@map("canteens")
+}
+
+model CanteenWorkingHours {
+  id        Int     @id @default(autoincrement())
+  canteenId Int
+  canteen   Canteen @relation(fields: [canteenId], references: [id], onDelete: Cascade)
+  meal      String  @db.VarChar(20)
+  fromTime  String  @db.VarChar(5)
+  toTime    String  @db.VarChar(5)
+
+  @@map("canteen_working_hours")
+}
+
+model Reservation {
+  id        Int      @id @default(autoincrement())
+  studentId Int
+  student   Student  @relation(fields: [studentId], references: [id])
+  canteenId Int
+  canteen   Canteen  @relation(fields: [canteenId], references: [id])
+  date      DateTime @db.Date
+  time      String   @db.VarChar(5)
+  duration  Int
+  status    String   @default("Active") @db.VarChar(20)
+  createdAt DateTime @default(now())
+
+  @@unique([studentId, date, time])
+  @@map("reservations")
+}

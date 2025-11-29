@@ -1,7 +1,5 @@
-import redisClient from "../config/redis.js";
+import prisma from "../config/db.js";
 import { getStudent } from "./studentService.js";
-
-const CANTEEN_COUNTER_KEY = 'canteen:id:counter';
 
 /**
  * Get the meal name for a given time based on workingHours
@@ -103,7 +101,7 @@ function generateTimeSlots(startDate, startTime, endDate, endTime, duration, wor
 }
 
 /**
- * Get canteen status with available slots
+ * Get canteen status with available slots using COUNT()
  */
 export async function getCanteenStatus(canteenId, startDate, startTime, endDate, endTime, duration) {
     const canteen = await getCanteen(canteenId);
@@ -114,26 +112,37 @@ export async function getCanteenStatus(canteenId, startDate, startTime, endDate,
     const durationMin = parseInt(duration);
     const slots = generateTimeSlots(startDate, startTime, endDate, endTime, durationMin, canteen.workingHours);
 
-    // Fetch current counts for all slots
+    // Fetch current counts for all slots using COUNT() aggregation
     const result = [];
 
     for (const slot of slots) {
-        const slotKey = `slot:${canteenId}:${slot.date}:${slot.time}`;
+        const slotDate = new Date(slot.date);
 
         if (durationMin === 60) {
             // For 60-min slots, get both 30-min slot counts
             const [hours] = slot.time.split(':').map(Number);
             const nextTime = `${String(hours).padStart(2, '0')}:30`;
-            const nextSlotKey = `slot:${canteenId}:${slot.date}:${nextTime}`;
 
             const [count1, count2] = await Promise.all([
-                redisClient.get(slotKey),
-                redisClient.get(nextSlotKey)
+                prisma.reservation.count({
+                    where: {
+                        canteenId: parseInt(canteenId, 10),
+                        date: slotDate,
+                        time: slot.time,
+                        status: 'Active'
+                    }
+                }),
+                prisma.reservation.count({
+                    where: {
+                        canteenId: parseInt(canteenId, 10),
+                        date: slotDate,
+                        time: nextTime,
+                        status: 'Active'
+                    }
+                })
             ]);
 
-            const used1 = parseInt(count1 || '0', 10);
-            const used2 = parseInt(count2 || '0', 10);
-            const remainingCapacity = canteen.capacity - Math.max(used1, used2);
+            const remainingCapacity = canteen.capacity - Math.max(count1, count2);
 
             result.push({
                 date: slot.date,
@@ -143,9 +152,15 @@ export async function getCanteenStatus(canteenId, startDate, startTime, endDate,
             });
         } else {
             // For 30-min slots
-            const count = await redisClient.get(slotKey);
-            const used = parseInt(count || '0', 10);
-            const remainingCapacity = canteen.capacity - used;
+            const count = await prisma.reservation.count({
+                where: {
+                    canteenId: parseInt(canteenId, 10),
+                    date: slotDate,
+                    time: slot.time,
+                    status: 'Active'
+                }
+            });
+            const remainingCapacity = canteen.capacity - count;
 
             result.push({
                 date: slot.date,
@@ -179,7 +194,7 @@ export async function getAllCanteensStatus(startDate, startTime, endDate, endTim
 }
 
 async function checkAdminStudent(studentId) {
-    // Chack if student creating the canteen is admin
+    // Check if student creating the canteen is admin
     const student = await getStudent(studentId);
     if (!student || !student.isAdmin) {
         throw new Error('Only admin students can create canteens');
@@ -292,58 +307,76 @@ function validateCanteenData(canteenData) {
 
 export async function createCanteen(canteenData) {
     const validatedData = validateCanteenData(canteenData);
-    const id = await redisClient.incr(CANTEEN_COUNTER_KEY);
-    const canteenKey = `canteen:${id}`;
 
-    // Chack if student creating the canteen is admin
+    // Check if student creating the canteen is admin
     await checkAdminStudent(validatedData.createdBy);
 
-    await redisClient.hSet(canteenKey, {
-        id: id.toString(),
-        name: validatedData.name,
-        location: validatedData.location,
-        capacity: validatedData.capacity,
-        workingHours: JSON.stringify(validatedData.workingHours),
-        createdBy: validatedData.createdBy,
-        createdAt: new Date().toISOString()
+    const canteen = await prisma.canteen.create({
+        data: {
+            name: validatedData.name,
+            location: validatedData.location,
+            capacity: validatedData.capacity,
+            createdById: parseInt(validatedData.createdBy, 10),
+            workingHours: {
+                create: validatedData.workingHours.map(wh => ({
+                    meal: wh.meal,
+                    fromTime: wh.from,
+                    toTime: wh.to
+                }))
+            }
+        },
+        include: {
+            workingHours: true
+        }
     });
-    const { createdBy, createdAt, ...publicData } = validatedData;
-    return { id, ...publicData };
-}
 
-function sanitizeCanteen(canteen) {
     return {
-        id: parseInt(canteen.id, 10),
+        id: canteen.id,
         name: canteen.name,
         location: canteen.location,
-        capacity: parseInt(canteen.capacity, 10),
-        workingHours: JSON.parse(canteen.workingHours)
+        capacity: canteen.capacity,
+        workingHours: canteen.workingHours.map(wh => ({
+            meal: wh.meal,
+            from: wh.fromTime,
+            to: wh.toTime
+        }))
+    };
+}
+
+function formatCanteen(canteen) {
+    return {
+        id: canteen.id,
+        name: canteen.name,
+        location: canteen.location,
+        capacity: canteen.capacity,
+        workingHours: canteen.workingHours.map(wh => ({
+            meal: wh.meal,
+            from: wh.fromTime,
+            to: wh.toTime
+        }))
     };
 }
 
 export async function getAllCanteens() {
-    const canteenIds = await redisClient.keys('canteen:*');
-    const canteens = [];
-    for (const key of canteenIds) {
-        if (key === CANTEEN_COUNTER_KEY) continue;
-        const canteen = await redisClient.hGetAll(key);
-        canteens.push(sanitizeCanteen(canteen));
-    }
-    return canteens;
+    const canteens = await prisma.canteen.findMany({
+        include: {
+            workingHours: true
+        }
+    });
+    return canteens.map(formatCanteen);
 }
 
 export async function getCanteen(id) {
-    const canteen = await redisClient.hGetAll(`canteen:${id}`);
-    if (Object.keys(canteen).length === 0) {
+    const canteen = await prisma.canteen.findUnique({
+        where: { id: parseInt(id, 10) },
+        include: {
+            workingHours: true
+        }
+    });
+    if (!canteen) {
         return null;
     }
-    return {
-        id: parseInt(canteen.id, 10),
-        name: canteen.name,
-        location: canteen.location,
-        capacity: parseInt(canteen.capacity, 10),
-        workingHours: JSON.parse(canteen.workingHours)
-    };
+    return formatCanteen(canteen);
 }
 
 function validateCanteenUpdateData(updateData) {
@@ -444,7 +477,7 @@ function validateCanteenUpdateData(updateData) {
             }
         }
 
-        validated.workingHours = JSON.stringify(updateData.workingHours);
+        validated.workingHours = updateData.workingHours;
     }
 
     // Return null if no valid fields provided
@@ -457,21 +490,68 @@ function validateCanteenUpdateData(updateData) {
 
 
 export async function updateCanteen(id, updateData, updatedBy) {
-    const canteenKey = `canteen:${id}`;
+    const canteenId = parseInt(id, 10);
     await checkAdminStudent(updatedBy);
-    const existingCanteen = await redisClient.hGetAll(canteenKey);
-    if (Object.keys(existingCanteen).length === 0) {
+    
+    const existingCanteen = await prisma.canteen.findUnique({
+        where: { id: canteenId }
+    });
+    if (!existingCanteen) {
         return null;
     }
+    
     const validatedData = validateCanteenUpdateData(updateData);
-    const updatedCanteen = { ...existingCanteen, ...validatedData };
-    await redisClient.hSet(canteenKey, updatedCanteen);
-    return updatedCanteen;
+    
+    // Build update data
+    const prismaUpdateData = {};
+    if (validatedData.name) prismaUpdateData.name = validatedData.name;
+    if (validatedData.location) prismaUpdateData.location = validatedData.location;
+    if (validatedData.capacity) prismaUpdateData.capacity = validatedData.capacity;
+
+    // If workingHours are being updated, delete old ones and create new
+    if (validatedData.workingHours) {
+        await prisma.$transaction([
+            prisma.canteenWorkingHours.deleteMany({
+                where: { canteenId }
+            }),
+            prisma.canteen.update({
+                where: { id: canteenId },
+                data: {
+                    ...prismaUpdateData,
+                    workingHours: {
+                        create: validatedData.workingHours.map(wh => ({
+                            meal: wh.meal,
+                            fromTime: wh.from,
+                            toTime: wh.to
+                        }))
+                    }
+                }
+            })
+        ]);
+    } else {
+        await prisma.canteen.update({
+            where: { id: canteenId },
+            data: prismaUpdateData
+        });
+    }
+
+    return await getCanteen(canteenId);
 }
 
 export async function deleteCanteen(id, deletedBy) {
-    const canteenKey = `canteen:${id}`;
+    const canteenId = parseInt(id, 10);
     await checkAdminStudent(deletedBy);
-    const result = await redisClient.del(canteenKey);
-    return result === 1;
+    
+    const existingCanteen = await prisma.canteen.findUnique({
+        where: { id: canteenId }
+    });
+    if (!existingCanteen) {
+        return false;
+    }
+
+    await prisma.canteen.delete({
+        where: { id: canteenId }
+    });
+    
+    return true;
 }
