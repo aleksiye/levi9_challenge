@@ -15,6 +15,19 @@ app.use('/students', studentRoutes);
 app.use('/canteens', canteenRoutes);
 app.use('/reservations', reservationRoutes);
 
+// Cleanup endpoint - deletes all data from the database
+app.delete('/cleanup', async (req, res) => {
+  try {
+    await prisma.reservation.deleteMany();
+    await prisma.canteenWorkingHours.deleteMany();
+    await prisma.canteen.deleteMany();
+    await prisma.student.deleteMany();
+    res.json({ message: 'All data cleaned up successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 const PORT = 3000;
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
