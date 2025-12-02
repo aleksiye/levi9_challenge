@@ -1,5 +1,5 @@
 import express from 'express';
-import prisma from './config/db.js';
+import redisClient from './config/redis.js' ;
 import studentRoutes from './routes/students.js';
 import canteenRoutes from './routes/canteens.js';
 import reservationRoutes from './routes/reservations.js';
@@ -7,26 +7,12 @@ import reservationRoutes from './routes/reservations.js';
 const app = express();
 app.use(express.json());
 
-// Connect to database
-await prisma.$connect();
-console.log('Connected to PostgreSQL database.');
+await redisClient.flushAll();
+console.log('Flushed all Redis data on startup.');
 
 app.use('/students', studentRoutes);
 app.use('/canteens', canteenRoutes);
 app.use('/reservations', reservationRoutes);
-
-// Cleanup endpoint - deletes all data from the database
-app.delete('/cleanup', async (req, res) => {
-  try {
-    await prisma.reservation.deleteMany();
-    await prisma.canteenWorkingHours.deleteMany();
-    await prisma.canteen.deleteMany();
-    await prisma.student.deleteMany();
-    res.json({ message: 'All data cleaned up successfully' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
 const PORT = 3000;
 app.listen(PORT, () => {
